@@ -64,6 +64,8 @@ class PipelineStartRequest(BaseModel):
     max_iterations: int = 3
     system_config: SystemConfig = Field(default_factory=SystemConfig)
     tuning: str = ""  # extra prompt instructions
+    disable_self_mod: bool = False  # phase2/B1: skip self_modification_node entirely
+    reset_config: bool = False
 
 
 class PipelineStartResponse(BaseModel):
@@ -184,6 +186,7 @@ class AgentState(TypedDict, total=False):
     should_stop: bool
     final_score: float | None
     error: str | None
+    disable_self_mod: bool  # phase2: B1 baseline — skip self-modification node
 
 
 # ─────────────────────────────────────────────────────────────────────────────

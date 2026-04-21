@@ -1317,6 +1317,8 @@ class PipelineStartReq(BaseModel):
     max_iterations: int = 3
     system_config: dict[str, Any] = Field(default_factory=dict)
     tuning: str = ""
+    disable_self_mod: bool = False  # phase2/B1: skip self_modification_node
+    reset_config: bool = False      # phase2/B2: semantic flag for batch bookkeeping
 
 
 class PipelineStartResp(BaseModel):
@@ -1372,7 +1374,7 @@ async def pipeline_start(req: PipelineStartReq) -> PipelineStartResp:
                 conn.commit()
         except Exception:
             pass
-
+    
     # Fire-and-forget background task
     asyncio.create_task(
         run_pipeline(  # type: ignore[misc]
@@ -1382,6 +1384,7 @@ async def pipeline_start(req: PipelineStartReq) -> PipelineStartResp:
             max_iterations=req.max_iterations,
             system_config=cfg,
             tuning=req.tuning,
+            disable_self_mod=req.disable_self_mod,  # phase2
         )
     )
 
