@@ -1988,6 +1988,7 @@ export default function App() {
           };
           modLogAcc.push(modEntry);
           setModificationLog([...modLogAcc]);
+          saveStorage("modification-log", [...modLogAcc]);  // day1: persist for rollback
           if (p.applied && p.after_config) {
             setSystemConfig(p.after_config);
             saveStorage("system-config", p.after_config);
@@ -2856,8 +2857,11 @@ export default function App() {
                               fontFamily: "var(--mono)", fontSize: 10,
                             }}>
                               <span>
-                                <span style={{ color: m.applied ? "#3D5C2E" : "#7A2D29", fontWeight: 600 }}>
-                                  {m.applied ? "✓ APPLIED" : "✗ REJECTED"}
+                                <span style={{ 
+                                  color: m.isRollback ? "#8A6830" : (m.applied ? "#3D5C2E" : "#7A2D29"),
+                                  fontWeight: 600 
+                                }}>
+                                  {m.isRollback ? "↶ ROLLED BACK" : (m.applied ? "✓ APPLIED" : "✗ REJECTED")}
                                 </span>
                                 <span style={{ color: "#9C9689", marginLeft: 10 }}>iter #{m.iter}</span>
                                 {m.verdict.backendsUsed && m.verdict.backendsUsed.length > 0 && (
@@ -2878,6 +2882,42 @@ export default function App() {
                                 )}
                               </span>
                               <span style={{ color: "#9C9689", fontSize: 9 }}>
+                                {m.applied && m.beforeConfig && (
+                                  <button
+                                  onClick={async () => {
+                                    if (!confirm(`Rollback to config before iter #${m.iter}?\n\nThis restores:\n  citationsPerParagraph = ${m.beforeConfig.generation?.citationsPerParagraph ?? "?"}\n  targetTotalWords = ${m.beforeConfig.generation?.targetTotalWords ?? "?"}\n  ...and other params from before this modification was applied.`)) return;
+                                    setSystemConfig(m.beforeConfig);
+                                    await saveStorage("system-config", m.beforeConfig);
+                                    // Append a rollback event to the log so it's visible
+                                    const rollbackEntry = {
+                                      iter: m.iter,
+                                      timestamp: new Date().toISOString(),
+                                      applied: false,
+                                      isRollback: true,  
+                                      proposal: {
+                                        target_path: "(rollback)",
+                                        reasoning: `Manual rollback of iter #${m.iter} modification. Config restored to state before that apply.`,
+                                        expectedEffect: "Revert config to pre-mod state.",
+                                      },
+                                      verdict: { verdict: "ROLLED_BACK", diffs: [], proofChain: "manual rollback (no verification)" },
+                                      beforeConfig: m.afterConfig,
+                                      afterConfig: m.beforeConfig,
+                                    };
+                                    const newLog = [...modificationLog, rollbackEntry];
+                                    setModificationLog(newLog);
+                                    await saveStorage("modification-log", newLog);
+                                  }}
+                                  style={{
+                                    marginLeft: 12, padding: "2px 10px", fontSize: 9,
+                                    fontFamily: "var(--mono)", border: "1px solid #D4B896",
+                                    background: "#FFF8EC", color: "#8A6830",
+                                    borderRadius: 2, cursor: "pointer",
+                                  }}
+                                  title="Restore config to before this modification was applied"
+                                >
+                                  ↶ Rollback
+                                </button>
+                              )}
                                 {new Date(m.timestamp).toLocaleString()}
                               </span>
                             </div>

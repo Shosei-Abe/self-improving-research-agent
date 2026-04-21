@@ -44,3 +44,8 @@ mongo-data/
 # Old React prototype (pre-pipeline.py, kept for reference only)
 self-improving-agent.jsx
 self-improving-agent.jsx.old
+
+# Phase 1 backups (before/after Sub-step patches)
+*.bak_sub*
+*.bak_phase2
+*.bak_await

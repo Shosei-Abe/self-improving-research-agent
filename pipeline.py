@@ -233,8 +233,16 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
             f"Paper:\n{state.get('uploaded_paper', '')[:3000]}\n\nCreate improvement plan.",
         )
     else:
+        # day1/rag: pull context from past similar runs
+        rag_context = await _rag_search_plans(run_id, state["topic"])
+        if rag_context:
+            await emit(run_id, "log", {
+                "agent": "orchestrator",
+                "message": "RAG context from past runs injected",
+                "type": "ok",
+            })
         raw = await call_llm(
-            plan_system_prompt(state["topic"], ""),
+            plan_system_prompt(state["topic"], rag_context),
             f'Research topic: "{state["topic"]}"\nCreate execution plan.',
         )
 
@@ -414,6 +422,15 @@ async def verification_node(state: AgentState) -> dict[str, Any]:
 
 async def self_modification_node(state: AgentState) -> dict[str, Any]:
     run_id = state["run_id"]
+    # phase2/B1: if the caller requested no self-modification (baseline
+    # condition), skip proposal+verify entirely. feedback_node still runs.
+    if state.get("disable_self_mod"):
+        await emit(run_id, "log", {
+            "agent": "orchestrator",
+            "message": "Self-modification disabled (B1 baseline mode)",
+            "type": "info",
+        })
+        return {}
     iteration = state.get("iteration", 1)
     cfg = state["system_config"]
     await emit(run_id, "log", {"agent": "orchestrator", "message": "Self-modification: analyzing...", "type": "iter"})
@@ -559,6 +576,58 @@ async def _write_checkpoint(
         "state": snapshot,
     })
 
+# day1/rag: Chroma-backed retrieval of past-run plans for context-aware
+# planning. Best-effort — any error (Chroma down, network, schema mismatch)
+# silently falls back to empty context so orchestrator still proceeds.
+async def _rag_search_plans(run_id: str, topic: str, n_results: int = 3) -> str:
+    """Fetch past plans similar to `topic` and format as RAG context string.
+    Returns "" on any failure — orchestrator treats empty as 'no RAG'."""
+    try:
+        async with httpx.AsyncClient(base_url="http://localhost:8000", timeout=5.0) as client:
+            r = await client.post("/papers/search", json={
+                "collection": "run_plans",
+                "query": topic,
+                "n_results": n_results,
+            })
+            if r.status_code != 200:
+                return ""
+            hits = r.json().get("hits", [])
+            if not hits:
+                return ""
+            lines = ["Insights from past runs on similar topics:"]
+            for h in hits[:n_results]:
+                snippet = (h.get("text") or "")[:400]
+                prev_score = h.get("metadata", {}).get("final_score", "?")
+                lines.append(f"- (prev score={prev_score}) {snippet}")
+            return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+async def _rag_embed_plan(run_id: str, topic: str, plan: dict[str, Any], final_score: float) -> None:
+    """Persist this run's plan into Chroma for future RAG retrieval.
+    Called once per run after successful completion. Silent on failure."""
+    try:
+        doc_text = (
+            f"Topic: {topic}\n"
+            f"Title: {plan.get('title', '')}\n"
+            f"Sections: {', '.join(plan.get('sections', []))}\n"
+            f"Key concepts: {', '.join(plan.get('key_concepts', []))}\n"
+            f"Methodology: {plan.get('methodology_hints', '')}\n"
+            f"Reasoning: {plan.get('reasoning', '')}"
+        )
+        async with httpx.AsyncClient(base_url="http://localhost:8000", timeout=10.0) as client:
+            await client.post("/papers/embed", json={
+                "collection": "run_plans",
+                "documents": [{
+                    "id": run_id,
+                    "text": doc_text,
+                    "metadata": {"topic": topic, "final_score": float(final_score)},
+                }],
+            })
+    except Exception:
+        pass
+
 def _extract_final_config(final_state: Any) -> dict[str, Any] | None:
     """Pull system_config out of LangGraph's last-chunk shape.
 
@@ -641,6 +710,7 @@ async def run_pipeline(
     max_iterations: int,
     system_config: dict[str, Any],
     tuning: str,
+    disable_self_mod: bool = False,  # phase2/B1
 ) -> None:
     """Run the full pipeline. All progress flows through emit() to the SSE queue."""
     initial_state: AgentState = {
@@ -654,6 +724,7 @@ async def run_pipeline(
         "iteration": 0,
         "paper": uploaded_paper or "",
         "paper_versions": [],
+        "disable_self_mod": disable_self_mod,  # phase2
         "research_results": [],
         "scores": [],
         "verification_results": [],
@@ -681,7 +752,18 @@ async def run_pipeline(
 
         # day1: extract the final system_config from whatever node wrote last.
         # graph.astream yields dicts keyed by node name; the config lives inside.
+        # day1: extract the final system_config from whatever node wrote last.
         final_cfg = _extract_final_config(final_state) or initial_state.get("system_config")
+
+        # day1/rag: persist this run's plan for future context retrieval
+        if final_state:
+            plan_for_rag = None
+            for v in final_state.values():
+                if isinstance(v, dict) and v.get("plan"):
+                    plan_for_rag = v["plan"]
+                    break
+            if plan_for_rag:
+                await _rag_embed_plan(run_id, topic or "(uploaded)", plan_for_rag, _latest_score.get(run_id) or 0.0)
 
         await emit(run_id, "complete", {"final_state": "ok"})
         await _db_write(run_id, "POST", f"/state/run/{run_id}/finalize", {
