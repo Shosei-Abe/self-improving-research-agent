@@ -1,0 +1,71 @@
+version: "3.9"
+
+# Full backing store for the self-improving research agent.
+#
+#   docker compose up -d           # start all three databases
+#   docker compose ps              # verify health
+#   docker compose down            # stop (keeps volumes)
+#   docker compose down -v         # stop and wipe volumes (reset everything)
+#
+# All three services bind to localhost only so nothing is exposed to the
+# network by default. Change the host part of the port mapping if you need
+# remote access (and add authentication first).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent_dev_password
+      POSTGRES_DB: agent_state
+    ports:
+      - "127.0.0.1:5434:5432"   # host 5433 → container 5432 (avoids clashing with local Postgres)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_state"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:7
+    container_name: agent-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: agent
+      MONGO_INITDB_ROOT_PASSWORD: agent_dev_password
+      MONGO_INITDB_DATABASE: agent_logs
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  chroma:
+    image: chromadb/chroma:0.5.5
+    container_name: agent-chroma
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  mongo_data:
+  chroma_data:

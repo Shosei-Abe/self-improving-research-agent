@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node (frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Environment / secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+
+# Backup files from Day 1
+*.bak_day1
+
+# Editor
+.vscode/
+.idea/
+
+# Docker volume data (shouldn't be tracked)
+postgres-data/
+chroma-data/
+mongo-data/
+
+# Debug artifacts
+/tmp/
+*.log
+
+# Legacy backup archives and pre-phase snapshots (manually created before git init)
+*.tar.gz
+*.tar
+*.zip
+*.before-*
+*.old
+
+# Old React prototype (pre-pipeline.py, kept for reference only)
+self-improving-agent.jsx
+self-improving-agent.jsx.old
