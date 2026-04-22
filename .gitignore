@@ -49,3 +49,8 @@ self-improving-agent.jsx.old
 *.bak_sub*
 *.bak_phase2
 *.bak_await
+
+# Private working notes (not for public)
+handoff-*.md
+handoffs/
+b1_smoke.jsonl
